@@ -115,16 +115,22 @@ def get_customer_order_no():
 	create a unique id for a new customer_order
 	:return: string
 	"""
-	total_customer_order_num = len(g.cursor.execute("SELECT * FROM customer_order").fetchall()) + 1
-	return '0' * (3 - len(str(total_customer_order_num))) + str(total_customer_order_num)
+	max_customer_order_num = g.cursor.execute('SELECT MAX(order_id) FROM customer_order').fetchall()[0][0]
+	if not max_customer_order_num:
+		max_customer_order_num = 0
+	customer_order_id = int(max_customer_order_num) + 1
+	return '0' * (3 - len(str(customer_order_id))) + str(customer_order_id)
 
 def get_dish_order_no():
 	"""
 	create a unique id for a new dish_order
 	:return: string
 	"""
-	total_dish_order_num = len(g.cursor.execute("SELECT * FROM dish_order").fetchall()) + 1
-	return '0' * (4 - len(str(total_dish_order_num))) + str(total_dish_order_num)
+	max_dish_order_num = g.cursor.execute('SELECT MAX(dish_order_id) FROM dish_order').fetchall()[0][0]
+	if not max_dish_order_num:
+		max_dish_order_num = 0
+	dish_order_id = int(max_dish_order_num) + 1
+	return '0' * (4 - len(str(dish_order_id))) + str(dish_order_id)
 
 def get_dish_no(restaurant_id):
 	"""
@@ -582,10 +588,14 @@ def submit_order():
 		g.cursor.execute("INSERT INTO customer_order VALUES('%s', '%s', '%s', '%s', NULL, NULL);"
 		                 % (restaurant_id, customer_id, customer_order_id,
 		                    datetime.now().strftime("%Y-%m-%d %H:%M:%S")))
+		g.cursor.execute("UPDATE restaurant SET total_month_sale = total_month_sale + '%d' "
+						 "WHERE restaurant_id = '%s'" % (sum(dish_counts.values()), restaurant_id))
 		for order, count in dish_counts.items():
 			dish_order_id = get_dish_order_no()
 			g.cursor.execute("INSERT INTO dish_order VALUES('%s', '%s', '%s', '%d');"
 			                 % (dish_order_id, customer_order_id, order, int(count)))
+			g.cursor.execute("UPDATE dish SET dish_month_sale = dish_month_sale + '%d' "
+							 "WHERE dish_id = '%s'" % (count, order))
 		g.conn.commit()
 		return jsonify({"succeed!": "succeed!"})
 	except Exception as e:
@@ -718,7 +728,7 @@ def restaurant_signup_submit():
 		if user_exist:
 			return jsonify({"ERROR": "This nickname has been registered, you can sign in now."})
 		g.cursor.execute("INSERT INTO restaurant VALUES ('%s', '%s', '%s', '%s', NULL, NULL, "
-		                 "NULL, NULL, NULL, NULL, NULL)"
+		                 "NULL, NULL, NULL, 0, NULL)"
 						 % (restaurant_id, owner_nickname, owner_password, restaurant_name))
 		g.conn.commit()
 		return jsonify({"restaurant_id": restaurant_id, "owner_nickname": owner_nickname,
@@ -831,8 +841,8 @@ def add_dish():
 	try:
 		if not dish_price.replace('.', '').isdigit():
 			return jsonify({"ERROR": "Please input valid price!"})
-		dish_names = g.cursor.execute("SELECT dish_name FROM dish WHERE restaurant_id = '%s'"
-									  % (restaurant_id)).fetchall()
+		dish_names = g.cursor.execute("SELECT dish_name FROM dish WHERE restaurant_id = '%s' "
+									  "AND NOT deleted" % (restaurant_id)).fetchall()
 		dish_names = [x[0] for x in dish_names]
 		if dish_name in dish_names:
 			return jsonify({"ERROR": "Dish name duplicated, select a new one!"})
@@ -862,7 +872,9 @@ def change_dish():
 		dish_names = g.cursor.execute("SELECT dish_name FROM dish WHERE restaurant_id = '%s'"
 									  % (restaurant_id)).fetchall()
 		dish_names = [x[0] for x in dish_names]
-		if dish_name in dish_names:
+		old_dish_name = g.cursor.execute("SELECT dish_name FROM dish WHERE dish_id = '%s' "
+										 "AND NOT deleted" % (dish_id)).fetchall()[0][0]
+		if dish_name != old_dish_name and dish_name in dish_names:
 			return jsonify({"ERROR": "Dish name duplicated, select a new one!"})
 		g.cursor.execute("UPDATE dish SET dish_price = '%f', dish_name = '%s'  WHERE dish_id = '%s'"
 		                 % (float(dish_price), dish_name, dish_id))
